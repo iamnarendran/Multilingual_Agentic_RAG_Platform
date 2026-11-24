@@ -1,206 +1,87 @@
-from fastapi import FastAPI, Request, status
+"""FastAPI application factory.
+
+Run with:  uvicorn --factory app.main:create_app --reload
+"""
+
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-from datetime import datetime
-import time
+from sqlalchemy import update
 
-from app.config import settings, LOGGING_CONFIG
-from app.api.routes import health, query, documents
-from app.utils.logger import setup_logger
-from app.utils.exceptions import RAGException
-import logging.config
+from app.agents.graph import build_graph
+from app.agents.llm import OpenAICompatibleLLM
+from app.api import auth, chat, conversations, documents, health
+from app.config import Settings, get_settings
+from app.db import Document, create_engine, create_sessionmaker, init_db
+from app.rag.embeddings import create_embedder
+from app.rag.vector_store import VectorStore
+from app.services import Services
 
-# Setup logging
-logging.config.dictConfig(LOGGING_CONFIG)
-logger = setup_logger(__name__)
-
-# =============================================================================
-# CREATE FASTAPI APP
-# =============================================================================
-
-app = FastAPI(
-    title=settings.APP_NAME,
-    description="""
-    **Multilingual Document Intelligence Platform**
-    
-    A production-ready RAG (Retrieval-Augmented Generation) system supporting 22+ Indian languages.
-    
-    ## Features
-    
-    * 🌍 **Multilingual Support**: English + 22 Indian languages
-    * 🤖 **Multi-Agent System**: Specialized agents for routing, retrieval, analysis, synthesis, and validation
-    * 📚 **Document Processing**: PDF, DOCX, TXT, CSV support
-    * 🔍 **Semantic Search**: Hybrid vector + keyword search
-    * ✅ **Citation Tracking**: All answers include source citations
-    * 🎯 **Query Classification**: Automatic query type detection
-    * 📊 **Cost Tracking**: Track API costs per query
-    
-    ## Supported Languages
-    
-    English, Hindi, Bengali, Telugu, Marathi, Tamil, Urdu, Gujarati, Kannada, Malayalam,
-    Odia, Punjabi, Assamese, Maithili, Sanskrit, Kashmiri, Nepali, Sindhi, Konkani,
-    Dogri, Manipuri, Santali, Bodo
-    
-    ## Quick Start
-    
-    1. Upload documents: `POST /api/v1/documents/upload`
-    2. Query documents: `POST /api/v1/query`
-    3. List documents: `GET /api/v1/documents`
-    """,
-    version=settings.APP_VERSION,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json"
-)
-
-# =============================================================================
-# MIDDLEWARE
-# =============================================================================
-
-# CORS Middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+logger = logging.getLogger("app")
 
 
-# Request timing middleware
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    """Add processing time to response headers"""
-    start_time = time.time()
-    response = await call_next(request)
-    process_time = time.time() - start_time
-    response.headers["X-Process-Time"] = str(process_time)
-    return response
-
-
-# Logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Log all requests"""
-    logger.info(f"Request: {request.method} {request.url.path}")
-    response = await call_next(request)
-    logger.info(f"Response: {response.status_code}")
-    return response
-
-
-# =============================================================================
-# EXCEPTION HANDLERS
-# =============================================================================
-
-@app.exception_handler(RAGException)
-async def rag_exception_handler(request: Request, exc: RAGException):
-    """Handle custom RAG exceptions"""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": exc.__class__.__name__,
-            "message": exc.message,
-            "details": exc.details,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+def build_services(settings: Settings) -> Services:
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    engine = create_engine(settings.resolved_database_url)
+    return Services(
+        settings=settings,
+        engine=engine,
+        sessionmaker=create_sessionmaker(engine),
+        embedder=create_embedder(settings),
+        vector_store=VectorStore.from_settings(settings),
+        llm=OpenAICompatibleLLM(settings),
     )
 
 
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handle request validation errors"""
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "error": "ValidationError",
-            "message": "Request validation failed",
-            "details": exc.errors(),
-            "timestamp": datetime.utcnow().isoformat()
-        }
+def create_app(settings: Settings | None = None, services: Services | None = None) -> FastAPI:
+    settings = settings or (services.settings if services else get_settings())
+    logging.basicConfig(
+        level=settings.log_level.upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        svc = services or build_services(settings)
+        svc.settings.data_dir.mkdir(parents=True, exist_ok=True)
+        await init_db(svc.engine)
+        await svc.vector_store.ensure_collection()
+        svc.graph = build_graph(svc)
+        # Jobs interrupted by a restart will never finish; tell the user to re-upload.
+        async with svc.sessionmaker() as session:
+            await session.execute(
+                update(Document)
+                .where(Document.status == "processing")
+                .values(status="failed", error="Processing was interrupted by a server restart. Please upload again.")
+            )
+            await session.commit()
+        app.state.services = svc
+        if not settings.llm_configured:
+            logger.warning("LLM_API_KEY is not set: chat will return a configuration error until it is.")
+        logger.info("%s v%s ready", settings.app_name, settings.app_version)
+        yield
+        await svc.vector_store.close()
+        await svc.engine.dispose()
 
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    """Handle all other exceptions"""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "error": "InternalServerError",
-            "message": "An unexpected error occurred",
-            "timestamp": datetime.utcnow().isoformat()
-        }
+    app = FastAPI(
+        title=settings.app_name,
+        version=settings.app_version,
+        description="Multilingual agentic RAG API: upload documents in English and Indian languages, chat with them.",
+        lifespan=lifespan,
+        docs_url=f"{settings.api_prefix}/docs",
+        openapi_url=f"{settings.api_prefix}/openapi.json",
     )
-
-
-# =============================================================================
-# ROUTES
-# =============================================================================
-
-# Include routers
-app.include_router(health.router, prefix=settings.API_V1_PREFIX)
-app.include_router(query.router, prefix=settings.API_V1_PREFIX)
-app.include_router(documents.router, prefix=settings.API_V1_PREFIX)
-
-
-# Root endpoint
-@app.get("/", tags=["Root"])
-async def root():
-    """
-    Root endpoint - API information
-    """
-    return {
-        "name": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "status": "running",
-        "docs": "/docs",
-        "health": f"{settings.API_V1_PREFIX}/health"
-    }
-
-
-# =============================================================================
-# STARTUP & SHUTDOWN EVENTS
-# =============================================================================
-
-@app.on_event("startup")
-async def startup_event():
-    """
-    Execute on application startup
-    """
-    logger.info("=" * 80)
-    logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    logger.info(f"Environment: {settings.ENVIRONMENT}")
-    logger.info(f"Debug mode: {settings.DEBUG}")
-    logger.info("=" * 80)
-    
-    # Initialize connections (lazy loading)
-    logger.info("Application ready to accept requests")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """
-    Execute on application shutdown
-    """
-    logger.info("=" * 80)
-    logger.info("Shutting down application...")
-    logger.info("=" * 80)
-
-
-# =============================================================================
-# MAIN (for direct execution)
-# =============================================================================
-
-if __name__ == "__main__":
-    import uvicorn
-    
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=settings.DEBUG,
-        log_level=settings.LOG_LEVEL.lower()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origin_list,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
-
+    for module in (health, auth, documents, conversations, chat):
+        app.include_router(module.router, prefix=settings.api_prefix)
+    return app

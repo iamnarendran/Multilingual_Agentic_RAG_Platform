@@ -1,120 +1,55 @@
-"""
-API Dependencies
+"""FastAPI dependencies: services, DB session and the authenticated user."""
 
-Dependency injection functions for FastAPI endpoints.
-"""
+from __future__ import annotations
 
-from typing import Generator, Optional
-from fastapi import Depends, HTTPException, status, Header
+from collections.abc import AsyncIterator
+from typing import Annotated
 
-from app.config import settings, Settings
-from app.agents.orchestrator import RAGOrchestrator
-from app.core.vector_store import get_vector_store, VectorStore
-from app.utils.logger import get_logger
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = get_logger(__name__)
+from app.db import User
+from app.security import decode_access_token
+from app.services import Services
 
-
-# =============================================================================
-# CONFIGURATION DEPENDENCY
-# =============================================================================
-
-def get_settings() -> Settings:
-    """
-    Get application settings.
-    
-    Returns:
-        Settings instance
-    """
-    return settings
+_bearer = HTTPBearer(auto_error=False)
 
 
-# =============================================================================
-# ORCHESTRATOR DEPENDENCY (Singleton)
-# =============================================================================
-
-_orchestrator: Optional[RAGOrchestrator] = None
+def get_services(request: Request) -> Services:
+    return request.app.state.services
 
 
-def get_orchestrator() -> RAGOrchestrator:
-    """
-    Get RAG orchestrator instance (singleton).
-    
-    Returns:
-        RAGOrchestrator instance
-    """
-    global _orchestrator
-    
-    if _orchestrator is None:
-        logger.info("Initializing RAG Orchestrator...")
-        _orchestrator = RAGOrchestrator()
-        logger.info("✅ RAG Orchestrator ready")
-    
-    return _orchestrator
+ServicesDep = Annotated[Services, Depends(get_services)]
 
 
-# =============================================================================
-# VECTOR STORE DEPENDENCY
-# =============================================================================
-
-def get_vector_db() -> VectorStore:
-    """
-    Get vector store instance.
-    
-    Returns:
-        VectorStore instance
-    """
-    return get_vector_store()
+async def get_db(services: ServicesDep) -> AsyncIterator[AsyncSession]:
+    async with services.sessionmaker() as session:
+        yield session
 
 
-# =============================================================================
-# AUTHENTICATION (Simple - Enhance for Production)
-# =============================================================================
-
-def get_current_user(
-    x_user_id: Optional[str] = Header(None)
-) -> str:
-    """
-    Get current user ID from header.
-    
-    In production, replace this with proper JWT authentication.
-    
-    Args:
-        x_user_id: User ID from header
-    
-    Returns:
-        User ID
-    
-    Raises:
-        HTTPException: If authentication fails
-    """
-    if not x_user_id:
-        # For now, use a default user if not provided
-        # In production, this should raise an authentication error
-        logger.warning("No user ID provided, using default")
-        return "default_user"
-    
-    return x_user_id
+DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
-# =============================================================================
-# RATE LIMITING (Simple - Enhance for Production)
-# =============================================================================
+async def get_current_user(
+    services: ServicesDep,
+    session: DbDep,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> User:
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    if credentials is None:
+        raise unauthorized
+    user_id = decode_access_token(credentials.credentials, services.settings)
+    if user_id is None:
+        raise unauthorized
+    user = await session.get(User, user_id)
+    if user is None:
+        raise unauthorized
+    return user
 
-# In production, use a proper rate limiter like slowapi
-# For now, this is a placeholder
 
-def check_rate_limit(user_id: str = Depends(get_current_user)):
-    """
-    Check rate limit for user.
-    
-    In production, implement proper rate limiting with Redis.
-    
-    Args:
-        user_id: User ID
-    
-    Raises:
-        HTTPException: If rate limit exceeded
-    """
-    # TODO: Implement proper rate limiting
-    pass
+CurrentUser = Annotated[User, Depends(get_current_user)]

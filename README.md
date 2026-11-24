@@ -1,353 +1,215 @@
-# [🌍 Multilingual Document Intelligence Platform](https://multilingualagenticragplatform.streamlit.app/)
+# Akshara (अक्षर): Multilingual Agentic RAG
 
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)](https://fastapi.tiangolo.com/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+Ask questions about your documents in English or any of 22 Indian languages and get answers that cite the exact page they came from. A team of AI agents plans the search, checks what it found, writes the answer in your language and verifies it against the sources, and you can watch each step happen live.
 
-A production-ready **Retrieval-Augmented Generation (RAG)** system supporting **22+ Indian languages** with **multi-agent architecture** for intelligent document analysis and question answering.
+![Chat: the agent trace, a cited answer and its sources](docs/images/chat.jpg)
 
-## ✨ Key Features
+| Library: a Tamil PDF with broken fonts, read with OCR | Mobile, dark mode, asking in Tamil |
+| --- | --- |
+| ![Library panel](docs/images/library.jpg) | ![Mobile chat in Tamil](docs/images/mobile-tamil.jpg) |
 
-- 🌐 **Multilingual Support**: English + 22 Indian languages (Hindi, Bengali, Telugu, Tamil, etc.)
-- 🤖 **Multi-Agent System**: 6 specialized AI agents (Router, Planner, Retriever, Analyzer, Synthesizer, Validator)
-- 📄 **Document Processing**: PDF, DOCX, TXT, CSV with smart chunking
-- 🔍 **Hybrid Search**: Vector similarity + BM25 keyword search
-- ✅ **Citation Tracking**: Every answer includes source citations
-- 🎯 **Query Classification**: Auto-detects query type (QA, Comparison, Summarization, etc.)
-- 💰 **Cost Tracking**: Real-time API cost monitoring
-- 🚀 **Production Ready**: Docker, monitoring, error handling, logging
+<sub>Screenshots taken with the offline demo backend (see [Try it without API keys](#1-try-it-without-api-keys)), which quotes passages instead of calling a language model.</sub>
 
-## 🏗️ Architecture
+## What it does
+
+- **Chat with your documents.** Upload PDF, Word, text, Markdown or CSV files, then ask. Answers stream in word by word with numbered citations; hover a citation to preview the passage, open a source to read it in full.
+- **Any language in, same language out.** Ask in Hindi about an English report, or in English about a Tamil book. The answer comes back in the language you asked in.
+- **Reads hard PDFs.** Many Indian-language PDFs use old fonts whose embedded text is garbage. Akshara detects that page by page and re-reads those pages (and scanned ones) with OCR.
+- **Agents you can watch.** Every answer shows which agents ran, what they decided and how long they took.
+- **Honest answers.** If your documents don't contain the answer, it says so rather than guessing. A validator flags statements the sources don't support.
+- **A real app.** Accounts, private per-user libraries, saved conversations you can rename or delete, document scoping ("search only these files"), stop button, dark mode, mobile layout.
+
+## How it works
+
+### The agents (LangGraph)
+
 ```
-┌─────────────────────────────────────────────────┐
-│           FastAPI REST API                      │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐      │
-│   │  Query   │  │Documents │  │  Health  │      │
-│   └──────────┘  └──────────┘  └──────────┘      │
-└────────────────────┬────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────┐
-│        Multi-Agent Orchestrator (LangGraph)     │
-│  ┌──────┐ ┌────────┐ ┌──────────┐ ┌─────────┐   │
-│  │Router│→│Planner │→│Retriever │→│Analyzer │   │
-│  └──────┘ └────────┘ └──────────┘ └─────────┘   │
-│       ┌──────────┐        ┌──────────┐          │
-│       │Synthesis │   ←    │Validator │          │
-│       └──────────┘        └──────────┘          │
-└────────────────────┬────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────┐
-│             Core Components                     │
-│   ┌─────────────┐  ┌──────────┐  ┌───────────┐  │
-│   │ Embeddings  │  │  Qdrant  │  │ Document  │  │
-│   │(E5-Large)   │  │(Vector)  │  │ Processor │  │
-│   └─────────────┘  └──────────┘  └───────────┘  │
-└─────────────────────────────────────────────────┘
-```
-## 📁 Project Structure
-```
-multilingual-rag/
-│
-├── .github/
-│   └── workflows/
-│       ├── ci.yml                      # GitHub Actions CI/CD
-│       └── deploy.yml                  # Auto-deployment
-│
-├── backend/
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py                     # FastAPI application entry point
-│   │   ├── config.py                   # Configuration management
-│   │   │
-│   │   ├── core/                       # Core functionality
-│   │   │   ├── __init__.py
-│   │   │   ├── embeddings.py           # Multilingual embedding system
-│   │   │   ├── vector_store.py         # Qdrant integration
-│   │   │   ├── document_processor.py   # PDF/DOCX extraction & chunking
-│   │   │   ├── language_detector.py    # Language detection
-│   │   │   ├── reranker.py             # Document reranking
-│   │   │   └── prompts.py              # System prompts for agents
-│   │   │
-│   │   ├── agents/                     # Multi-agent system (LangGraph)
-│   │   │   ├── __init__.py
-│   │   │   ├── base.py                 # Base agent class
-│   │   │   ├── router.py               # Query routing agent
-│   │   │   ├── planner.py              # Query planning agent
-│   │   │   ├── retriever.py            # Retrieval agent
-│   │   │   ├── analyzer.py             # Analysis agent
-│   │   │   ├── synthesizer.py          # Synthesis agent
-│   │   │   ├── validator.py            # Validation agent
-│   │   │   └── orchestrator.py         # LangGraph orchestration
-│   │   │
-│   │   ├── api/                        # API layer
-│   │   │   ├── __init__.py
-│   │   │   ├── deps.py                 # Dependencies (auth, db connections)
-│   │   │   ├── middleware.py           # Custom middleware
-│   │   │   └── routes/
-│   │   │       ├── __init__.py
-│   │   │       ├── query.py            # Query endpoints
-│   │   │       ├── documents.py        # Document management
-│   │   │       ├── users.py            # User management
-│   │   │       └── health.py           # Health checks
-│   │   │
-│   │   ├── models/                     # Data models
-│   │   │   ├── __init__.py
-│   │   │   ├── schemas.py              # Pydantic models (API)
-│   │   │   ├── database.py             # SQLAlchemy models
-│   │   │   └── enums.py                # Enums (query types, languages)
-│   │   │
-│   │   ├── services/                   # Business logic
-│   │   │   ├── __init__.py
-│   │   │   ├── query_service.py        # Query processing logic
-│   │   │   ├── document_service.py     # Document management logic
-│   │   │   └── user_service.py         # User management logic
-│   │   │
-│   │   └── utils/                      # Utilities
-│   │       ├── __init__.py
-│   │       ├── logger.py               # Logging setup
-│   │       ├── security.py             # JWT, password hashing
-│   │       ├── helpers.py              # Helper functions
-│   │       └── exceptions.py           # Custom exceptions
-│   │
-│   ├── tests/                          # Tests
-│   │   ├── __init__.py
-│   │   ├── conftest.py                 # Pytest fixtures
-│   │   ├── test_embeddings.py
-│   │   ├── test_vector_store.py
-│   │   ├── test_agents.py
-│   │   └── test_api.py
-│   │
-│   ├── alembic/                        # Database migrations
-│   │   ├── versions/
-│   │   └── env.py
-│   │
-│   ├── requirements.txt                # Python dependencies
-│   ├── requirements-dev.txt            # Development dependencies
-│   └── Dockerfile                      # Docker image (for deployment)
-│
-├── scripts/                            # Utility scripts
-│   ├── setup_cloud_services.sh         # Setup Qdrant, Supabase
-│   ├── seed_database.py                # Seed test data
-│   ├── run_tests.sh                    # Run all tests
-│   └── deploy.sh                       # Deployment script
-│
-├── data/                               # Sample data (for testing)
-│   ├── sample_docs/
-│   │   ├── sample_en.pdf
-│   │   ├── sample_hi.pdf
-│   │   └── sample_mixed.docx
-│   └── test_queries.json
-│
-├── notebooks/                          # Jupyter notebooks (experimentation)
-│   ├── 01_test_embeddings.ipynb
-│   ├── 02_test_vector_store.ipynb
-│   ├── 03_test_agents.ipynb
-│   └── 04_demo.ipynb
-│
-├── docs/                               # Documentation
-│   ├── architecture.md
-│   ├── api_reference.md
-│   ├── deployment.md
-│   └── development.md
-│
-├── .env.example                        # Example environment variables
-├── .gitignore                          # Git ignore file
-├── .devcontainer/                      # Codespaces configuration
-│   └── devcontainer.json
-├── docker-compose.yml                  # Docker compose (optional local dev)
-├── pyproject.toml                      # Python project config
-├── README.md                           # Project documentation
-└── LICENSE                             # License file
+question ─► Language ─► Router ──┬── small talk ────────────────────────────► Generator ─► done
+                                 │
+                                 └── documents ─► Planner ─► Retriever ─► Grader ─┬─► Generator ─► Validator ─► done
+                                                    ▲                              │
+                                                    └──── nothing relevant: retry ─┘
 ```
 
-## 🚀 Quick Start
+| Agent | Uses an LLM? | Job |
+| --- | --- | --- |
+| **Language** | no | Detects the question's language from its Unicode script (then `langdetect` to tell apart languages that share a script, like Hindi and Marathi). |
+| **Router** | yes (fast model) | Decides if the message needs the documents, classifies it (factual, comparison, summary, ...) and rewrites follow-ups like "what did he write?" into a standalone question. |
+| **Planner** | yes (fast model) | Writes up to 5 search queries, translated into the languages your documents are written in, so a Hindi question can find English text and vice versa. |
+| **Retriever** | no | Runs every query as a hybrid search (meaning + keywords) in Qdrant and merges the results with Reciprocal Rank Fusion. |
+| **Grader** | yes (fast model) | Keeps only passages that actually help. If none do, it sends feedback to the Planner for one more try (corrective RAG). |
+| **Generator** | yes (main model) | Streams the answer in the question's language, citing sources as [1], [2], ... |
+| **Validator** | yes (fast model) | Checks each claim against the cited sources and flags unsupported ones. |
 
-### Prerequisites
+Each agent reports progress through LangGraph's custom stream; the API forwards it to the browser as Server-Sent Events.
 
-- Python 3.11+
-- Docker & Docker Compose (optional)
-- OpenRouter API key
-- Qdrant Cloud account (free tier)
+### Ingestion
 
-### 1. Clone Repository
-```bash
-git clone https://github.com/yourusername/multilingual-rag.git
-cd multilingual-rag
+```
+upload ─► extract text ─► garbled or scanned page? ─► OCR (Tesseract) ─► strip running headers/footers
+       ─► Indic-aware chunking ─► dense vectors (multilingual-e5-large) + BM25 sparse vectors ─► Qdrant
 ```
 
-### 2. Setup Environment
-```bash
-# Copy example environment file
-cp .env.example .env
+- **Garbled-text detection**: measures the share of control and private-use glyphs per page; legacy-font Tamil scores about 13%, clean text about 0%.
+- **Chunking** splits on paragraphs, lines, then sentence ends including the Devanagari danda `।` and `॥`; chunks never cross pages so every citation has a page number.
+- **Keyword search** uses a custom BM25 tokenizer that keeps Indic words whole. Standard tokenizers split words like `किताब` at their vowel signs.
+- **Isolation**: every chunk carries its owner's id and every query filters on it.
 
-# Edit .env with your API keys
-nano .env
-```
+## Tech stack
 
-Required environment variables:
-```bash
-OPENROUTER_API_KEY=sk-or-v1-xxxxx
-QDRANT_URL=https://your-cluster.cloud.qdrant.io:6333
-QDRANT_API_KEY=your-qdrant-key
-DATABASE_URL=postgresql://user:pass@host:5432/db
-```
+| Layer | Choice |
+| --- | --- |
+| Frontend | Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, the [Anek](https://github.com/EkType/Anek) type family for all Indian scripts |
+| API | FastAPI, Server-Sent Events, JWT auth (bcrypt passwords) |
+| Agents | LangGraph; any OpenAI-compatible LLM API ([OpenRouter](https://openrouter.ai) by default: Claude, Gemini, GPT, Llama, ...) |
+| Retrieval | Qdrant hybrid search (dense + sparse with IDF), RRF fusion |
+| Embeddings | `intfloat/multilingual-e5-large` run locally with fastembed (ONNX, CPU, no PyTorch), or any embeddings API |
+| Documents | PyMuPDF, python-docx, Tesseract OCR |
+| Data | SQLite by default, PostgreSQL in production (SQLAlchemy 2, async) |
 
-### 3. Install Dependencies
-```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+## Quick start
 
-# Install dependencies
-pip install -r backend/requirements.txt
-```
+### 1. Try it without API keys
 
-### 4. Run Application
+The demo backend runs the real app (auth, uploads, OCR, hybrid search, the agent graph, streaming) with a toy embedder and a scripted "LLM" that just quotes the passages it finds. Data lives in memory.
 
-**Option A: Direct Python**
 ```bash
 cd backend
-python -m app.main
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+python -m scripts.demo_server                       # http://localhost:8000
 ```
 
-**Option B: Docker Compose**
+In a second terminal:
+
 ```bash
-docker-compose up -d
+cd frontend
+npm install
+npm run dev                                         # http://localhost:3000
 ```
 
-### 5. Access API
+Create an account, upload `data/sample_docs/sample_en.pdf` and ask away.
 
-- **API Documentation**: http://localhost:8000/docs
-- **Health Check**: http://localhost:8000/api/v1/health
+### 2. Run it for real
 
-## 📚 Usage Examples
+You need Python 3.12, Node.js 20.9+ and an [OpenRouter API key](https://openrouter.ai/keys) (or any OpenAI-compatible endpoint).
 
-### Upload Document
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents/upload" \
-  -H "X-User-Id: user123" \
-  -F "file=@document.pdf"
+cd backend
+cp .env.example .env        # set LLM_API_KEY; pick models with LLM_MODEL / LLM_FAST_MODEL
+uvicorn --factory app.main:create_app --reload
 ```
 
-### Query Documents
+Then start the frontend as above. With no other setup the backend uses SQLite and an embedded Qdrant under `backend/data/`. The first upload downloads the embedding model (about 2 GB) into the local cache.
+
+**OCR (optional but recommended for Indian-language PDFs)**: install Tesseract with the language packs you need.
+
 ```bash
-curl -X POST "http://localhost:8000/api/v1/query" \
-  -H "Content-Type: application/json" \
-  -H "X-User-Id: user123" \
-  -d '{
-    "query": "What is the capital of India?",
-    "top_k": 5
-  }'
+sudo apt install tesseract-ocr tesseract-ocr-hin tesseract-ocr-tam tesseract-ocr-tel   # Debian/Ubuntu
+brew install tesseract tesseract-lang                                                  # macOS
 ```
 
-### Python Client
-```python
-import requests
+Without it, scanned and broken-font pages are skipped and the document shows a warning.
 
-# Upload document
-with open("document.pdf", "rb") as f:
-    response = requests.post(
-        "http://localhost:8000/api/v1/documents/upload",
-        headers={"X-User-Id": "user123"},
-        files={"file": f}
-    )
+### 3. Docker Compose (full stack)
 
-# Query
-response = requests.post(
-    "http://localhost:8000/api/v1/query",
-    headers={"X-User-Id": "user123"},
-    json={"query": "What is AI?", "top_k": 5}
-)
-
-result = response.json()
-print(result["answer"])
-```
-
-## 🧪 Testing
 ```bash
-# Run tests
-pytest backend/tests/
-
-# Run with coverage
-pytest --cov=app backend/tests/
-
-# Test specific component
-python backend/app/core/embeddings.py
-python backend/app/agents/orchestrator.py
+cp backend/.env.example backend/.env   # set LLM_API_KEY and JWT_SECRET (openssl rand -hex 32)
+docker compose up --build
 ```
 
-## 📊 Performance
+This starts the UI (port 3000), the API (8000, docs at `/api/docs`), PostgreSQL and a Qdrant server. The backend image includes Tesseract with OCR packs for 11 Indian languages and English. If the UI is served from another host, build it with `PUBLIC_API_URL=https://api.example.com` and set `CORS_ORIGINS` to match.
 
-- **Query Processing**: 2-4 seconds average
-- **Cost per Query**: $0.005 - $0.01 (optimized with Gemini Flash + Claude Sonnet)
-- **Supported Documents**: PDF, DOCX, TXT, CSV (up to 50MB)
-- **Concurrent Requests**: 100+ (with proper scaling)
+## Configuration
 
-## 🛠️ Tech Stack
+All settings are environment variables (see [`backend/.env.example`](backend/.env.example)). The important ones:
 
-**Backend**
-- FastAPI 0.109
-- LangGraph (Multi-agent orchestration)
-- LangChain (RAG pipeline)
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LLM_API_KEY` | (none) | Key for the LLM API. Required to answer questions. |
+| `LLM_BASE_URL` | `https://openrouter.ai/api/v1` | Any OpenAI-compatible endpoint. |
+| `LLM_MODEL` | `openai/gpt-oss-120b` | Writes answers. |
+| `LLM_FAST_MODEL` | `openai/gpt-oss-20b` | Router, Planner, Grader, Validator. |
+| `ROUTER_MODEL` … `VALIDATOR_MODEL` | (unset) | Per-agent model overrides. |
+| `JWT_SECRET` | dev value | Required (32+ characters) when `ENVIRONMENT=production`. |
+| `DATABASE_URL` | SQLite in `data/` | e.g. `postgresql+asyncpg://user:pass@host/db` |
+| `QDRANT_URL` | embedded | e.g. `http://localhost:6333` or a Qdrant Cloud URL (+ `QDRANT_API_KEY`). |
+| `EMBEDDING_PROVIDER` | `fastembed` | `fastembed` (local) or `openai` (any embeddings API; also set `EMBEDDING_MODEL`, `EMBEDDING_DIM`). |
+| `OCR_LANGUAGES` | 11 Indian languages + English | Tesseract languages to use when installed. |
+| `MAX_UPLOAD_MB` | `25` | Upload size limit. |
 
-**AI/ML**
-- OpenRouter (LLM Gateway)
-- Claude Sonnet 3.5 (Analysis & Synthesis)
-- Gemini Flash 2.0 (Routing & Validation)
-- multilingual-e5-large (Embeddings)
+## API
 
-**Databases**
-- Qdrant (Vector database)
-- PostgreSQL (Metadata)
-- Redis (Caching)
+Interactive docs: `http://localhost:8000/api/docs`. All routes except register, login and health need `Authorization: Bearer <token>`.
 
-**DevOps**
-- Docker & Docker Compose
-- Nginx (Reverse proxy)
-- Prometheus + Grafana (Monitoring)
+| Method and path | Purpose |
+| --- | --- |
+| `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me` | Accounts |
+| `POST /api/documents` (multipart `file`) | Upload; processing continues in the background |
+| `GET /api/documents`, `GET /api/documents/{id}`, `DELETE /api/documents/{id}` | Library |
+| `GET /api/conversations`, `GET`/`PATCH`/`DELETE /api/conversations/{id}` | Saved chats |
+| `POST /api/chat` | Ask a question; streams Server-Sent Events |
+| `GET /api/health` | Status of the LLM config, vector store and OCR |
 
+`POST /api/chat` takes `{"message": "...", "conversation_id": "optional", "document_ids": ["optional"]}` and streams these events: `start`, `meta` (language, query type), `step` (each agent's progress), `sources`, `token`, `validation`, `error`, `done`. Stopping the request mid-answer saves the partial answer.
 
+## Project structure
 
-## 🌟 Advanced Features
+```
+backend/
+  app/
+    main.py              app factory and startup
+    config.py            settings (environment variables)
+    db.py                users, conversations, messages, documents (SQLAlchemy)
+    security.py          password hashing, JWT
+    api/                 auth, documents, conversations, chat (SSE), health
+    agents/
+      graph.py           the LangGraph agent pipeline
+      prompts.py         every agent's prompt
+      llm.py             OpenAI-compatible client (JSON mode, streaming, friendly errors)
+    rag/
+      extraction.py      PDF/DOCX/TXT/CSV text, garbled-page detection, OCR, header stripping
+      chunking.py        Indic-aware chunking
+      language.py        script + langdetect language detection
+      sparse.py          multilingual BM25 vectors
+      embeddings.py      fastembed / API embeddings
+      vector_store.py    Qdrant hybrid search
+      ingestion.py       background upload pipeline
+  scripts/demo_server.py offline demo (no API keys)
+  tests/                 66 tests: agents, API, extraction (real sample PDFs), retrieval, LLM client
+frontend/
+  src/app/               routes: /login, /register, / and /c/[id]
+  src/components/        workspace, sidebar, chat view, messages, agent trace, library, composer
+  src/lib/               API client, SSE stream reader, auth, theme
+data/sample_docs/        an English PDF and a legacy-font Tamil PDF used in tests
+docker-compose.yml       UI + API + PostgreSQL + Qdrant
+Streamlit/               the original v1 demo (kept for the live Streamlit deployment)
+```
 
-### Custom Model Selection
+## Tests
 
-Change models per agent in `.env`:
 ```bash
-MODEL_ROUTER=google/gemini-2.0-flash-exp:free
-MODEL_ANALYZER=anthropic/claude-3.5-sonnet
-MODEL_SYNTHESIZER=openai/gpt-4-turbo
+cd backend && pytest -q          # runs offline: scripted LLM, toy embedder, in-memory Qdrant
+cd frontend && npm run typecheck && npm run build
 ```
 
-### Metadata Filtering
-```python
-response = requests.post(
-    "http://localhost:8000/api/v1/query",
-    json={
-        "query": "Find sales data",
-        "filters": {
-            "category": "finance",
-            "year": "2024"
-        }
-    }
-)
-```
+CI runs both on every push and pull request (`.github/workflows/ci.yml`).
 
+## Known limitations
 
-## 📄 License
+- No database migrations yet: tables are created on startup. Add Alembic before changing the schema of a deployed instance.
+- No rate limiting; put the API behind a gateway or add one before exposing it publicly.
+- The auth token is kept in the browser's `localStorage`. That's simple and works across origins, but an httpOnly cookie is safer against XSS.
+- Language detection can't tell apart languages that share a script and are rare in `langdetect` (e.g. Maithili or Konkani are reported as Hindi). Answers still come back in the script you used.
 
-MIT License - see [LICENSE](LICENSE) file
+## Version 1
 
+The first version (January 2026) was a FastAPI scaffold plus a single-file Streamlit demo. Version 2 rebuilds the backend so it runs and is tested, adds real hybrid search, OCR, accounts and saved chats, and replaces Streamlit with the Next.js app. The v1 Streamlit demo is still in [`Streamlit/`](Streamlit/) and powers the [live demo](https://multilingualagenticragplatform.streamlit.app/).
 
-⭐ **Star this repo if you find it helpful!**
+## License
 
---------
+MIT, see [LICENSE](LICENSE).
 
-🔗 Author
+## Author
 
-👨‍💻 **Narendran Karthikeyan**
-
-📎 [LinkedIn](https://github.com/iamnarendran) | [GitHub](https://www.linkedin.com/in/narendran-karthikeyan%F0%9F%8C%B3-95862423b)|
-
-------
-
+**Narendran Karthikeyan**: [GitHub](https://github.com/iamnarendran) · [LinkedIn](https://www.linkedin.com/in/narendran-karthikeyan%F0%9F%8C%B3-95862423b)

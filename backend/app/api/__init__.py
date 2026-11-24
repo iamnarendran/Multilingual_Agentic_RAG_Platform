@@ -1,5 +1,0 @@
-"""
-API Layer
-
-FastAPI routes and endpoints.
-"""

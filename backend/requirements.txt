@@ -1,0 +1,27 @@
+# Backend runtime dependencies (tested together). Install: pip install -r requirements.txt
+# --- API ---
+fastapi==0.165.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.34
+pydantic==2.14.4
+pydantic-settings==2.16.3
+email-validator==2.4.0
+# --- Auth ---
+pyjwt==2.15.1
+bcrypt==5.0.0
+# --- Database (SQLite by default, Postgres in production) ---
+sqlalchemy[asyncio]==2.1.9
+aiosqlite==0.22.1
+asyncpg==0.32.0
+# --- Agents / LLM (any OpenAI-compatible API, e.g. OpenRouter) ---
+langgraph==1.2.24
+openai==3.57.0
+httpx==0.28.1
+# --- Retrieval ---
+qdrant-client==1.20.0
+fastembed==0.9.1
+# --- Document processing & languages ---
+pymupdf==2.1
+python-docx==1.2.0
+langdetect==1.0.9
+regex==2026.11.19
