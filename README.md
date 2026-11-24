@@ -183,7 +183,7 @@ frontend/
   src/lib/               API client, SSE stream reader, auth, theme
 data/sample_docs/        an English PDF and a legacy-font Tamil PDF used in tests
 docker-compose.yml       UI + API + PostgreSQL + Qdrant
-Streamlit/               the original v1 demo (kept for the live Streamlit deployment)
+legacy/                  all of version 1, unchanged (FastAPI scaffold + Streamlit demo)
 ```
 
 ## Tests
@@ -204,7 +204,7 @@ CI runs both on every push and pull request (`.github/workflows/ci.yml`).
 
 ## Version 1
 
-The first version (January 2026) was a FastAPI scaffold plus a single-file Streamlit demo. Version 2 rebuilds the backend so it runs and is tested, adds real hybrid search, OCR, accounts and saved chats, and replaces Streamlit with the Next.js app. The v1 Streamlit demo is still in [`Streamlit/`](Streamlit/) and powers the [live demo](https://multilingualagenticragplatform.streamlit.app/).
+The first version (January 2026) was a FastAPI scaffold plus a single-file Streamlit demo. Version 2 rebuilds the backend so it runs and is tested, adds real hybrid search, OCR, accounts and saved chats, and replaces Streamlit with the Next.js app. All of version 1 is kept unchanged in [`legacy/`](legacy/), including the Streamlit demo behind the original [live demo](https://multilingualagenticragplatform.streamlit.app/).
 
 ## License
 
